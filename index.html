@@ -161,6 +161,90 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://blog.zelknow.com/2021/11/04/wsl2-proxy/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="ZelKnow">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="ZelKnow's Blog">
+    </span>
+      <header class="post-header">
+        <h2 class="post-title" itemprop="name headline">
+          
+            <a href="/2021/11/04/wsl2-proxy/" class="post-title-link" itemprop="url">WSL2 代理设置</a>
+        </h2>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2021-11-04 09:44:08 / 修改时间：09:59:44" itemprop="dateCreated datePublished" datetime="2021-11-04T09:44:08+08:00">2021-11-04</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/util/" itemprop="url" rel="index"><span itemprop="name">util</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+          <p>WSL2 是神器，可以方便地在 windows 下进行 linux 编程，但是里面有个大坑就是 WSL2 的代理设置，让我一直难连上 Github。经过一番折腾，终于让 WSL2 走了系统代理，下面简单记录一下流程。</p>
+<h2 id="wsl2-获取宿主机-ip">WSL2 获取宿主机 IP</h2>
+<p>因为 WSL2 是基于 <code>hyper-V</code> 的，它与 windows 不共享网络地址，因此也没法直接走代理。所以首先需要获取 wsl2 下的 windows 的 ip 地址才可以设置代理。命令：</p>
+<p><code>cat /etc/resolv.conf | grep nameserver | awk '&#123;print $2&#125;'</code></p>
+<h2 id="设置代理">设置代理</h2>
+<p>直接用命令</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">export http_proxy=&#x27;http://&lt;Host IP&gt;:&lt;Port&gt;&#x27;</span><br><span class="line">export https_proxy=&#x27;http://&lt;Host IP&gt;:&lt;Port&gt;&#x27;</span><br></pre></td></tr></table></figure>
+<p>就能设置代理了。当然要让 <code>git</code> 走代理，需要加下面的命令：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">git config --global http.proxy &lt;Host IP&gt;:&lt;Port&gt;</span><br><span class="line">git config --global https.proxy &lt;Host IP&gt;:&lt;Port&gt;</span><br></pre></td></tr></table></figure>
+<h2 id="脚本">脚本</h2>
+<p>可以写个脚本方便地启用和禁用代理，下面抄一个网上搜到的 <a target="_blank" rel="noopener" href="https://zinglix.xyz/2020/04/18/wsl2-proxy/">脚本</a></p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br></pre></td><td class="code"><pre><span class="line">#!/bin/sh</span><br><span class="line">hostip=$(cat /etc/resolv.conf | grep nameserver | awk &#x27;&#123; print $2 &#125;&#x27;)</span><br><span class="line">wslip=$(hostname -I | awk &#x27;&#123;print $1&#125;&#x27;)</span><br><span class="line">port=&lt;PORT&gt;</span><br><span class="line"></span><br><span class="line">PROXY_HTTP=&quot;http://$&#123;hostip&#125;:$&#123;port&#125;&quot;</span><br><span class="line"></span><br><span class="line">set_proxy ()&#123;</span><br><span class="line">    export http_proxy=&quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line">    export HTTP_PROXY=&quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line"></span><br><span class="line">    export https_proxy=&quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line">    export HTTPS_proxy=&quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line"></span><br><span class="line">	git config --global http.proxy &quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line">	git config --global https.proxy &quot;$&#123;PROXY_HTTP&#125;&quot;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">unset_proxy ()&#123;</span><br><span class="line">    unset http_proxy</span><br><span class="line">    unset HTTP_PROXY</span><br><span class="line">    unset https_proxy</span><br><span class="line">    unset HTTPS_PROXY</span><br><span class="line">    git config --global --unset http.proxy</span><br><span class="line">	git config --global --unset https.proxy</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">test_setting ()&#123;</span><br><span class="line">    echo &quot;Host ip:&quot; $&#123;hostip&#125;</span><br><span class="line">    echo &quot;WSL ip:&quot; $&#123;wslip&#125;</span><br><span class="line">    echo &quot;Current proxy:&quot; $https_proxy</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">if [ &quot;$1&quot; = &quot;set&quot; ]</span><br><span class="line">then</span><br><span class="line">    set_proxy</span><br><span class="line"></span><br><span class="line">elif [ &quot;$1&quot; = &quot;unset&quot; ]</span><br><span class="line">then</span><br><span class="line">    unset_proxy</span><br><span class="line"></span><br><span class="line">elif [ &quot;$1&quot; = &quot;test&quot; ]</span><br><span class="line">then</span><br><span class="line">    test_setting</span><br><span class="line">else</span><br><span class="line">    echo &quot;Unsupported arguments.&quot;</span><br><span class="line">fi</span><br></pre></td></tr></table></figure>
+<p>在 <code>~/.bashrc</code> 里面加下面两句话，让终端启动后自动执行脚本（记得修改脚本路径）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">alias proxy=&quot;source /path/to/proxy.sh&quot;</span><br><span class="line">. /path/to/proxy.sh set</span><br></pre></td></tr></table></figure>
+<h2 id="如果还不能连上-github">如果还不能连上 Github</h2>
+<p>首先试一下 <code>wget google.com</code> 看看代理有没有走成功，如果没有可能是 windows 防火墙的问题，打开防火墙 - 允许应用通过防火墙，把代理软件的勾都打上。或者在高级设置里设一下入站规则，允许所有应用所有协议，远程 ip 为 <code>172.16.0.0/12</code> 及 <code>192.168.0.0/16</code> 的入站请求。</p>
+<p>如果代理设置成功了还是用不了 <code>git</code>，那么估计是 <code>git</code> 设置问题。<code>git config --global -l</code> 看看设置，禁用掉不相关的设置，应该就 ok 了。</p>
+
+      
+    </div>
+
+    
+    
+    
+      <footer class="post-footer">
+        <div class="post-eof"></div>
+      </footer>
+  </article>
+  
+  
+  
+
+      
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
     <link itemprop="mainEntityOfPage" href="https://blog.zelknow.com/2021/10/23/vector-space-model/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
@@ -299,14 +383,14 @@
       <div class="site-state-item site-state-posts">
           <a href="/archives/">
         
-          <span class="site-state-item-count">1</span>
+          <span class="site-state-item-count">2</span>
           <span class="site-state-item-name">日志</span>
         </a>
       </div>
       <div class="site-state-item site-state-categories">
             <a href="/categories/">
           
-        <span class="site-state-item-count">1</span>
+        <span class="site-state-item-count">2</span>
         <span class="site-state-item-name">分类</span></a>
       </div>
   </nav>
