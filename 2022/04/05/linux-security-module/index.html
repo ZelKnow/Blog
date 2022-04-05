@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.4.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"blog.zelknow.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":true,"pangu":true,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="简单分析了 LSM（Linux 安全模块）的设计与实现，基于 Linux 5.10 版本的源码。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Linux 安全模块">
+<meta property="og:url" content="https://blog.zelknow.com/2022/04/05/linux-security-module/index.html">
+<meta property="og:site_name" content="ZelKnow&#39;s Blog">
+<meta property="og:description" content="简单分析了 LSM（Linux 安全模块）的设计与实现，基于 Linux 5.10 版本的源码。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/LSM_hook.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/Permissive.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/kernel_ds.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/find_hook.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/1.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/2.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/4.png">
+<meta property="og:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/complie.png">
+<meta property="article:published_time" content="2022-04-05T08:08:03.000Z">
+<meta property="article:modified_time" content="2022-04-05T08:24:06.641Z">
+<meta property="article:author" content="ZelKnow">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://blog.zelknow.com/2022/04/05/linux-security-module/LSM_hook.png">
+
+<link rel="canonical" href="https://blog.zelknow.com/2022/04/05/linux-security-module/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>Linux 安全模块 | ZelKnow's Blog</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">ZelKnow's Blog</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>关于</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://blog.zelknow.com/2022/04/05/linux-security-module/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="ZelKnow">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="ZelKnow's Blog">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Linux 安全模块
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2022-04-05 16:08:03 / 修改时间：16:24:06" itemprop="dateCreated datePublished" datetime="2022-04-05T16:08:03+08:00">2022-04-05</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/Security/" itemprop="url" rel="index"><span itemprop="name">Security</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>简单分析了 LSM（Linux 安全模块）的设计与实现，基于 Linux 5.10 版本的源码。</p>
+<span id="more"></span>
+<h2 id="背景">背景</h2>
+<ul>
+<li>主流操作系统的访问控制机制不足以提供强安全</li>
+<li>已有部分访控模型实现</li>
+<li>安全社区在通用解决方案上难达成一致</li>
+<li>Linux 支持动态加载内核模块</li>
+<li>可以将增强的访问控制实现成 Linux 内核模块以支持多种安全模型</li>
+<li>内核未提供任何基础设施来支持内核模块去管理访控</li>
+<li>内核模块只能在系统调用上做访控，有很大限制</li>
+<li>内核模块经常要求重实现内核功能或内核补丁来支持模块，非常麻烦</li>
+<li>Linux Kernel 2.5 Summit 上 NSA 提出了 SELinux，想要并入主线，Linus 拒绝了该提议，因为他观察到有很多安全模块都在开发中，倾向于做一个新的基础设施来支持内核模块实现安全，这样也避免了选择一个现有的安全模块</li>
+</ul>
+<h2 id="问题">问题</h2>
+<ul>
+<li>平衡内核开发者和多个安全项目的需要</li>
+<li>Linus 要求：
+<ul>
+<li>足够通用，使用另一个安全模型 = 加载另一个内核模块</li>
+<li>概念简单，对内核影响最少，高效</li>
+<li>可以支持目前的 POSIX.1e 能力，作为一个可选的安全模块</li>
+</ul></li>
+<li>系统调用接口
+<ul>
+<li>优点：覆盖系统调用查找表不需要对内核进行修改</li>
+<li>缺点：可能会出现重复代码，无法提供足够的上下文来做出决策</li>
+</ul></li>
+<li>LSM：轻量、通用的访控框架，使不同的访控模型可以实现成可加载的内核模块</li>
+<li>用相同的基础 linux 内核支持不同的安全模型，同时最小化对内核的影响</li>
+</ul>
+<h2 id="设计">设计</h2>
+<ul>
+<li>基本抽象：管理对内在内核对象的访问（* 主体 S 能对客体 OBJ 进行内核操作 OP 吗？*）</li>
+<li>使用 Hook 实现，在访问前调用。可以获得完整的内核上下文</li>
+</ul>
+<p><img data-src="LSM_hook.png" /></p>
+<ul>
+<li>LSM 模块是限制性（restrictive）的：只有当内核即将授予权限时，模块才会去检查；如果内核本来就要拒绝，则不会调用模块。最少影响</li>
+<li>能力有的时候会放行一个内核本来拒绝的请求，LSM 通过 Permissive LSM hook 来支持。该 hook 允许安全策略去重载一个 DAC 约束</li>
+</ul>
+<p><img data-src="Permissive.png" /></p>
+<ul>
+<li>在内核对象加入 security fields，可以让安全属性绑定到内核对象。但是模块必须全权管理这个 field</li>
+<li>模块组合（Module Composition）是一个挑战
+<ul>
+<li>模块组合可以提供更完全的功能</li>
+<li>策略组合很难处理</li>
+<li>提供模块堆栈，但让模块本身去完成大部分工作，即模块自身需导出 LSM-like 的接口，然后自己去调用其他模块</li>
+</ul></li>
+</ul>
+<h2 id="实现">实现</h2>
+<ul>
+<li>给内核数据结构加入了安全域</li>
+<li>在内核代码中插入了安全钩函数</li>
+<li>提供钩函数注册的方法</li>
+<li>加入了通用安全系统调用</li>
+<li>将能力实现成了一个可选的安全模块</li>
+</ul>
+<h2 id="安全域">安全域</h2>
+<h3 id="security-field">Security field</h3>
+<ul>
+<li>是一个 <code>void*</code> 指针</li>
+<li>大部份管理工作都交给安全模块，不提供锁</li>
+<li>LSM 仅提供了这个 <code>field</code> 以及一些钩函数去管理这个 <code>field</code>
+<ul>
+<li><code>alloc_security</code>：分配空间</li>
+<li><code>free_security</code>：释放空间</li>
+<li>设置安全域</li>
+</ul></li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//include/linux/sched.h</span></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">task_struct</span> &#123;</span></span><br><span class="line"><span class="meta">#<span class="meta-keyword">ifdef</span> CONFIG_SECURITY</span></span><br><span class="line">	<span class="comment">/* Used by LSM modules for access restriction: */</span></span><br><span class="line">	<span class="keyword">void</span>				*security;</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p><img data-src="kernel_ds.png" /></p>
+<h3 id="hook">Hook</h3>
+<ul>
+<li>在 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h"><code>include/linux/lsm_hooks.h</code></a> 中列举了所有钩函数</li>
+<li>声明在 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hook_defs.h"><code>include/linux/lsm_hook_defs.h</code></a> 中</li>
+<li>所有钩函数在 <code>security_hook_heads</code> 结构体中，按钩函数点分类 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//include/linux/lsm_hooks.h</span></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">security_hook_heads</span> &#123;</span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">define</span> LSM_HOOK (RET, DEFAULT, NAME, ...) struct hlist_head NAME;</span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">include</span> <span class="meta-string">&quot;lsm_hook_defs.h&quot;</span></span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">undef</span> LSM_HOOK</span></span><br><span class="line">&#125; __randomize_layout;</span><br></pre></td></tr></table></figure> <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//include/linux/types.h</span></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">hlist_head</span> &#123;</span></span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">hlist_node</span> *<span class="title">first</span>;</span></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure> <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//include/linux/types.h</span></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">hlist_node</span> &#123;</span></span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">hlist_node</span> *<span class="title">next</span>, **<span class="title">pprev</span>;</span></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure> ### 初始化</li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//security/security.c</span></span><br><span class="line"><span class="function"><span class="keyword">int</span> __init <span class="title">early_security_init</span><span class="params">(<span class="keyword">void</span>)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">	<span class="keyword">int</span> i;</span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">hlist_head</span> *<span class="title">list</span> =</span> (struct hlist_head *) &amp;security_hook_heads;</span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">lsm_info</span> *<span class="title">lsm</span>;</span></span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> (i = <span class="number">0</span>; i &lt; <span class="keyword">sizeof</span>(security_hook_heads) / <span class="keyword">sizeof</span>(struct hlist_head);</span><br><span class="line">	     i++)</span><br><span class="line">		INIT_HLIST_HEAD (&amp;<span class="built_in">list</span>[i]);</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> (lsm = __start_early_lsm_info; lsm &lt; __end_early_lsm_info; lsm++) &#123;</span><br><span class="line">		<span class="keyword">if</span> (!lsm-&gt;enabled)</span><br><span class="line">			lsm-&gt;enabled = &amp;lsm_enabled_true;</span><br><span class="line">		prepare_lsm (lsm);</span><br><span class="line">		initialize_lsm (lsm);</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#<span class="meta-keyword">define</span> INIT_HLIST_HEAD (ptr) ((ptr)-&gt;first = NULL)</span></span><br></pre></td></tr></table></figure>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//include/linux/lsm_hooks.h</span></span><br><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">security_hook_list</span> &#123;</span></span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">hlist_node</span>		<span class="title">list</span>;</span></span><br><span class="line">	<span class="class"><span class="keyword">struct</span> <span class="title">hlist_head</span>		*<span class="title">head</span>;</span></span><br><span class="line">	<span class="class"><span class="keyword">union</span> <span class="title">security_list_options</span>	<span class="title">hook</span>;</span></span><br><span class="line">	<span class="keyword">char</span>				*lsm;</span><br><span class="line">&#125; __randomize_layout;</span><br><span class="line"></span><br><span class="line"><span class="class"><span class="keyword">union</span> <span class="title">security_list_options</span> &#123;</span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">define</span> LSM_HOOK (RET, DEFAULT, NAME, ...) RET (*NAME)(__VA_ARGS__);</span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">include</span> <span class="meta-string">&quot;lsm_hook_defs.h&quot;</span></span></span><br><span class="line">	<span class="meta">#<span class="meta-keyword">undef</span> LSM_HOOK</span></span><br><span class="line">&#125;;</span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> LSM_HOOK_INIT (HEAD, HOOK) \</span></span><br><span class="line"><span class="meta">	&#123; .head = &amp;security_hook_heads.HEAD, .hook = &#123; .HEAD = HOOK &#125; &#125;</span></span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<ul>
+<li><code>security_hook_list</code> 代表一个 hook 点上定义的一个钩函数</li>
+<li><code>security_list_options</code> 定义了可选的 hook 函数，每一个 <code>security_hook_list</code> 对应的 hook 函数一定要是其中之一</li>
+<li><code>LSM_HOOK_INIT</code> 初始化一个 <code>security_hook_list</code></li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//security/commoncap.c</span></span><br><span class="line"><span class="keyword">static</span> <span class="class"><span class="keyword">struct</span> <span class="title">security_hook_list</span> <span class="title">capability_hooks</span>[] __<span class="title">lsm_ro_after_init</span> =</span> &#123;</span><br><span class="line">	LSM_HOOK_INIT (capable, cap_capable),</span><br><span class="line">	LSM_HOOK_INIT (settime, cap_settime),</span><br><span class="line">	LSM_HOOK_INIT (ptrace_access_check, cap_ptrace_access_check),</span><br><span class="line">	LSM_HOOK_INIT (ptrace_traceme, cap_ptrace_traceme),</span><br><span class="line">	LSM_HOOK_INIT (capget, cap_capget),</span><br><span class="line">	LSM_HOOK_INIT (capset, cap_capset),</span><br><span class="line">	LSM_HOOK_INIT (bprm_creds_from_file, cap_bprm_creds_from_file),</span><br><span class="line">	LSM_HOOK_INIT (inode_need_killpriv, cap_inode_need_killpriv),</span><br><span class="line">	LSM_HOOK_INIT (inode_killpriv, cap_inode_killpriv),</span><br><span class="line">	LSM_HOOK_INIT (inode_getsecurity, cap_inode_getsecurity),</span><br><span class="line">	LSM_HOOK_INIT (mmap_addr, cap_mmap_addr),</span><br><span class="line">	LSM_HOOK_INIT (mmap_file, cap_mmap_file),</span><br><span class="line">	LSM_HOOK_INIT (task_fix_setuid, cap_task_fix_setuid),</span><br><span class="line">	LSM_HOOK_INIT (task_prctl, cap_task_prctl),</span><br><span class="line">	LSM_HOOK_INIT (task_setscheduler, cap_task_setscheduler),</span><br><span class="line">	LSM_HOOK_INIT (task_setioprio, cap_task_setioprio),</span><br><span class="line">	LSM_HOOK_INIT (task_setnice, cap_task_setnice),</span><br><span class="line">	LSM_HOOK_INIT (vm_enough_memory, cap_vm_enough_memory),</span><br><span class="line">&#125;;	</span><br></pre></td></tr></table></figure>
+<h3 id="注册钩函数">注册钩函数</h3>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//security/security.c</span></span><br><span class="line"><span class="function"><span class="keyword">void</span> __init <span class="title">security_add_hooks</span><span class="params">(struct security_hook_list *hooks, <span class="keyword">int</span> count,</span></span></span><br><span class="line"><span class="params"><span class="function">				<span class="keyword">char</span> *lsm)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">	<span class="keyword">int</span> i;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> (i = <span class="number">0</span>; i &lt; count; i++) &#123;</span><br><span class="line">		hooks [i].lsm = lsm;</span><br><span class="line">		hlist_add_tail_rcu (&amp;hooks [i].<span class="built_in">list</span>, hooks [i].head);</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span> (slab_is_available ()) &#123;</span><br><span class="line">		<span class="keyword">if</span> (lsm_append (lsm, &amp;lsm_names) &lt; <span class="number">0</span>)</span><br><span class="line">			panic (<span class="string">&quot;% s - Cannot get early memory.\n&quot;</span>, __func__);</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<ul>
+<li><code>LSM_HOOK_INIT</code> 初始化 <code>security_hook_list</code></li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//fs/namei.c</span></span><br><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">vfs_mkdir</span><span class="params">(struct inode *dir, struct dentry *dentry,</span></span></span><br><span class="line"><span class="params"><span class="function">              <span class="keyword">umode_t</span> mode)</span> </span>&#123;</span><br><span class="line">	<span class="keyword">int</span> error = may_create (dir, dentry);</span><br><span class="line">	<span class="keyword">unsigned</span> max_links = dir-&gt;i_sb-&gt;s_max_links;</span><br><span class="line">	<span class="keyword">if</span> (error)</span><br><span class="line">		<span class="keyword">return</span> error;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span> (!dir-&gt;i_op-&gt;mkdir)</span><br><span class="line">		<span class="keyword">return</span> -EPERM;</span><br><span class="line"></span><br><span class="line">	mode &amp;= (S_IRWXUGO|S_ISVTX);</span><br><span class="line">	error = security_inode_mkdir (dir, dentry, mode);</span><br><span class="line">	<span class="keyword">if</span> (error)</span><br><span class="line">		<span class="keyword">return</span> error;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span> (max_links &amp;&amp; dir-&gt;i_nlink &gt;= max_links)</span><br><span class="line">		<span class="keyword">return</span> -EMLINK;</span><br><span class="line"></span><br><span class="line">	error = dir-&gt;i_op-&gt;mkdir (dir, dentry, mode);</span><br><span class="line">	<span class="keyword">if</span> (!error)</span><br><span class="line">		fsnotify_mkdir (dir, dentry);</span><br><span class="line">	<span class="keyword">return</span> error;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<ul>
+<li>举例 <code>vfs_mkdir ()</code></li>
+<li>为什么不在 <code>permission</code> 或 <code>may_create</code> 里插入：缺少操作类型以及 mode</li>
+<li>另一种方法：对 <code>mkdir</code> 打桩。提供相同功能，但也允许内核模块去实现更多的一般功能。因为内核模块可以使用非 GPL 的许可，这样实现可能不利于 LSM 被内核开发者接受</li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//security/security.c</span></span><br><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">security_inode_mkdir</span><span class="params">(struct inode *dir, struct dentry *dentry, <span class="keyword">umode_t</span> mode)</span></span></span><br><span class="line"><span class="function"></span>&#123;</span><br><span class="line">	<span class="keyword">if</span> (unlikely (IS_PRIVATE (dir)))</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">	<span class="keyword">return</span> call_int_hook (inode_mkdir, <span class="number">0</span>, dir, dentry, mode); <span class="comment">// 会逐个调用对应链表上的所有函数 </span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">#<span class="meta-keyword">define</span> call_int_hook (FUNC, IRC, ...) (&#123;			\</span></span><br><span class="line"><span class="meta">	int RC = IRC;						\</span></span><br><span class="line"><span class="meta">	do &#123;							\</span></span><br><span class="line"><span class="meta">		struct security_hook_list *P;			\</span></span><br><span class="line"><span class="meta">								\</span></span><br><span class="line"><span class="meta">		hlist_for_each_entry (P, &amp;security_hook_heads.FUNC, list) &#123; \</span></span><br><span class="line"><span class="meta">			RC = P-&gt;hook.FUNC (__VA_ARGS__);		\</span></span><br><span class="line"><span class="meta">			<span class="meta-keyword">if</span> (RC != 0)				\</span></span><br><span class="line"><span class="meta">				break;				\</span></span><br><span class="line"><span class="meta">		&#125;						\</span></span><br><span class="line"><span class="meta">	&#125; while (0);						\</span></span><br><span class="line"><span class="meta">	RC;							\</span></span><br><span class="line"><span class="meta">&#125;)</span></span><br><span class="line"></span><br></pre></td></tr></table></figure>
+<p><img data-src="find_hook.png" /></p>
+<h2 id="系统调用">系统调用</h2>
+<h3 id="system-call">System Call</h3>
+<ul>
+<li>LSM 提供了一个通用 <code>security ()</code> 系统调用，让安全模块去实现以供安全感知的应用去调用</li>
+<li>是一个多路复用器</li>
+<li>提供一个 <code>sys_security</code> 钩函数</li>
+<li>入口点可能不充分，则可以自己实现然后替换系统调用表</li>
+</ul>
+<h2 id="能力">能力</h2>
+<h3 id="capability">Capability</h3>
+<ul>
+<li>LSM 实现成一个模块</li>
+<li>能力：分割超级用户的权限并授予特定的进程</li>
+<li>于是 LSM 需要提供一个至少和能力有相同粒度的许可接口</li>
+<li>LSM 保留了内核中用于执行能力检查的现有接口，但将其简化为 LSM 钩函数的简单包装，允许其在安全模块中实现任何需要的逻辑</li>
+<li>这种实现避免了对内核的大量更改</li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//kernel/capability.c</span></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">has_capability</span><span class="params">(struct task_struct *t, <span class="keyword">int</span> cap)</span> </span>&#123;</span><br><span class="line">	<span class="keyword">return</span> has_ns_capability (t, &amp;init_user_ns, cap);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">has_ns_capability</span><span class="params">(struct task_struct *t,</span></span></span><br><span class="line"><span class="params"><span class="function">		       struct user_namespace *ns, <span class="keyword">int</span> cap)</span> </span>&#123;</span><br><span class="line">	<span class="keyword">int</span> ret;</span><br><span class="line"></span><br><span class="line">	rcu_read_lock ();</span><br><span class="line">	ret = security_capable (__task_cred (t), ns, cap, CAP_OPT_NONE);</span><br><span class="line">	rcu_read_unlock ();</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> (ret == <span class="number">0</span>);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//security/security.c</span></span><br><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">security_capable</span><span class="params">(<span class="keyword">const</span> struct cred *cred,</span></span></span><br><span class="line"><span class="params"><span class="function">		     struct user_namespace *ns,</span></span></span><br><span class="line"><span class="params"><span class="function">		     <span class="keyword">int</span> cap,</span></span></span><br><span class="line"><span class="params"><span class="function">		     <span class="keyword">unsigned</span> <span class="keyword">int</span> opts)</span> </span>&#123;</span><br><span class="line">	<span class="keyword">return</span> call_int_hook (capable, <span class="number">0</span>, cred, ns, cap, opts);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<ul>
+<li>能力集合存在 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/sched.h#L929"><code>task_struct</code></a> 中，也可以移动到 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/sched.h#L1333"><code>security_field</code></a> 中，但是不移可以支持在上面堆叠其他模块</li>
+<li>模块堆叠的一个难点在于共享安全域，而很多模块希望与能力堆叠
+<ul>
+<li>能力已存在主线一段时间</li>
+<li>有些应用依赖于能力，如 <code>named</code> 和 <code>sendmail</code></li>
+</ul></li>
+<li>不移动的话简化了这种模块组合，但是也浪费了不需要能力的模块的空间</li>
+<li>能力有两个系统调用 <code>capset</code> 和 <a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/kernel/capability.c#L148"><code>capget</code></a>，LSM 保留了这两个系统调用，但是将其替换为对 LSM 钩函数的调用。</li>
+<li>将 bit vector 移到安全域和重新放置系统调用接口是使能力称为独立模块的最后两步</li>
+</ul>
+<h2 id="钩函数分类">钩函数分类</h2>
+<h3 id="任务钩函数"><a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h#L585">任务钩函数</a></h3>
+<ul>
+<li>管理安全域</li>
+<li>对进程间操作的控制 (<code>kill</code>)</li>
+<li>对进程特权操作的控制 (<code>setuid</code>)</li>
+<li>对资源管理操作的细粒度控制 (<code>setrlimit</code> 和 <code>nice</code>)</li>
+</ul>
+<h3 id="程序加载钩函数"><a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h#L35">程序加载钩函数</a></h3>
+<ul>
+<li>安全模块要求执行新程序更改特权</li>
+<li>LSM 提供一组钩子，在 <code>execve</code> 的关键点调用</li>
+<li><code>linux_binprm</code> 结构中的安全域允许模块在程序加载时去管理安全信息</li>
+<li>允许安全模块去初始化该结构并在加载程序前访问访控信息</li>
+<li>允许安全模块在新程序加载成功后更新安全信息</li>
+</ul>
+<h3 id="ipc-钩函数"><a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h#L1148">IPC 钩函数</a></h3>
+<ul>
+<li>可通过 IPC 钩函数去管理 IPC 的安全信息和访控</li>
+<li>IPC 对象共享一个 <code>kern_ipc_perm</code> 数据结构，且在检查权限时只有一个指针传向 <code>ipcperms</code> 函数，因此 LSM 在这个数据结构里插入了一个安全域</li>
+<li>LSM 在 <code>msg_msg</code> 结构里插入安全域以支持独立消息</li>
+<li>LSM 在 <code>ipcperms</code> 函数中插入了钩函数，使模块可以对现有的 Linux IPC 权限检查进行检查</li>
+<li>LSM 还将钩函数插入到各个 IPC 操作上，提供关于操作类型和特定参数的信息</li>
+<li>还支持对 SystemV 消息队列发送的单个消息进行细粒度控制</li>
+</ul>
+<h3 id="文件系统钩函数"><a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h#L103">文件系统钩函数</a></h3>
+<ul>
+<li>三种钩函数：文件系统钩函数、<code>inode</code> 钩函数、文件钩函数</li>
+<li>对 <code>super_block</code>、<code>inode</code>、<code>file</code> 数据结构均插入了安全域</li>
+<li>文件系统钩函数让模块控制例如 <code>mounting</code> 和 <code>statfs</code> 的操作</li>
+<li><code>inode</code> 钩函数插到了 <code>permission</code> 函数中，另外也支持对独立 inode 操作的细粒度控制</li>
+<li>文件钩函数允许安全模块在文件操作（<code>read</code> 和 <code>write</code>）中进行额外安全检查</li>
+<li>可以不往 <code>inode</code> 和 <code>super_block</code> 中放安全域，改到 <code>dentry</code> 和 <code>vfsmount</code> 中
+<ul>
+<li>前一对对应具体的对象，独立于名称和名字空间</li>
+<li>后一对有对对应 <code>inode</code> 和 <code>super_block</code> 的引用，也和一个具体名称和名字空间关联。</li>
+<li>使用前一对的话避免了对象重名的问题</li>
+<li>且还提供了对内核对象的更多覆盖，因为这些结构也表示非文件对象，如管道和套接字。</li>
+</ul></li>
+</ul>
+<h3 id="网络钩函数"><a target="_blank" rel="noopener" href="https://elixir.bootlin.com/linux/v5.10/source/include/linux/lsm_hooks.h#L791">网络钩函数</a></h3>
+<ul>
+<li>应用层对网络的访问是通过套接字钩函数协调的</li>
+<li>包含所有套接字系统调用的插入，为所有套接字协议提供了粗粒度的中介覆盖</li>
+<li>因为用户套接字具有对应的 inode 结构，因此没有将安全域插入到套接字结构中</li>
+</ul>
+<h3 id="其他钩函数">其他钩函数</h3>
+<ul>
+<li>模块钩函数：用于控制创建、初始化和删除内核模块的操作</li>
+<li>系统钩函数：用于控制系统操作如设置系统主机名，访问 IO 端口等。能力可以对这些操作进行检查，但是粗粒度，且不提供参数信息</li>
+</ul>
+<h2 id="性能">性能</h2>
+<ul>
+<li>耦合的能力 vs 作为 LSM 模块的能力</li>
+<li>LSM 开销是 LSM 框架的开销 + 模块开销</li>
+</ul>
+<table>
+<tr>
+<td>
+<img data-src="./1.png" border=0>
+</td>
+<td>
+<img data-src="./2.png" border=0>
+</td>
+<td>
+<img data-src="./4.png" border=0>
+</td>
+</tr>
+</table>
+<p><img data-src="complie.png" /></p>
+<h2 id="待补充">待补充</h2>
+<ul>
+<li>钩函数点</li>
+<li>访控</li>
+<li>管理钩函数</li>
+<li>能力模块遗留的安全风险</li>
+<li>实现安全模块，实现钩函数</li>
+</ul>
+
+    </div>
+
+    
+    
+    
+        
+
+<div>
+<ul class="post-copyright">
+  <li class="post-copyright-author">
+    <strong>本文作者： </strong>ZelKnow
+  </li>
+  <li class="post-copyright-link">
+    <strong>本文链接：</strong>
+    <a href="https://blog.zelknow.com/2022/04/05/linux-security-module/" title="Linux 安全模块">https://blog.zelknow.com/2022/04/05/linux-security-module/</a>
+  </li>
+  <li class="post-copyright-license">
+    <strong>版权声明： </strong>本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh" rel="noopener" target="_blank"><i class="fab fa-fw fa-creative-commons"></i>BY-NC-SA</a> 许可协议。转载请注明出处！
+  </li>
+</ul>
+</div>
+
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2021/11/25/geekgame-2021-writeup/" rel="prev" title="GeekGame 2021 Writeup">
+      <i class="fa fa-chevron-left"></i> GeekGame 2021 Writeup
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E8%83%8C%E6%99%AF"><span class="nav-number">1.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%97%AE%E9%A2%98"><span class="nav-number">2.</span> <span class="nav-text">问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E8%AE%BE%E8%AE%A1"><span class="nav-number">3.</span> <span class="nav-text">设计</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%AE%9E%E7%8E%B0"><span class="nav-number">4.</span> <span class="nav-text">实现</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%AE%89%E5%85%A8%E5%9F%9F"><span class="nav-number">5.</span> <span class="nav-text">安全域</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#security-field"><span class="nav-number">5.1.</span> <span class="nav-text">Security field</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#hook"><span class="nav-number">5.2.</span> <span class="nav-text">Hook</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E6%B3%A8%E5%86%8C%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">5.3.</span> <span class="nav-text">注册钩函数</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%B3%BB%E7%BB%9F%E8%B0%83%E7%94%A8"><span class="nav-number">6.</span> <span class="nav-text">系统调用</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#system-call"><span class="nav-number">6.1.</span> <span class="nav-text">System Call</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E8%83%BD%E5%8A%9B"><span class="nav-number">7.</span> <span class="nav-text">能力</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#capability"><span class="nav-number">7.1.</span> <span class="nav-text">Capability</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%92%A9%E5%87%BD%E6%95%B0%E5%88%86%E7%B1%BB"><span class="nav-number">8.</span> <span class="nav-text">钩函数分类</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%BB%BB%E5%8A%A1%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.1.</span> <span class="nav-text">任务钩函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%A8%8B%E5%BA%8F%E5%8A%A0%E8%BD%BD%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.2.</span> <span class="nav-text">程序加载钩函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#ipc-%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.3.</span> <span class="nav-text">IPC 钩函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.4.</span> <span class="nav-text">文件系统钩函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%BD%91%E7%BB%9C%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.5.</span> <span class="nav-text">网络钩函数</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%85%B6%E4%BB%96%E9%92%A9%E5%87%BD%E6%95%B0"><span class="nav-number">8.6.</span> <span class="nav-text">其他钩函数</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%80%A7%E8%83%BD"><span class="nav-number">9.</span> <span class="nav-text">性能</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%BE%85%E8%A1%A5%E5%85%85"><span class="nav-number">10.</span> <span class="nav-text">待补充</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">ZelKnow</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">5</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">4</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <a href="https://github.com/zelknow" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;zelknow" rel="noopener" target="_blank"><i class="fab fa-github fa-fw"></i>GitHub</a>
+      </span>
+      <span class="links-of-author-item">
+        <a href="mailto:shenghuang@stu.pku.edu.cn" title="E-Mail → mailto:shenghuang@stu.pku.edu.cn" rel="noopener" target="_blank"><i class="fa fa-envelope fa-fw"></i>E-Mail</a>
+      </span>
+  </div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2022</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ZelKnow</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/lozad@1/dist/lozad.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/pangu@4/dist/browser/pangu.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+  
+
+</body>
+</html>
