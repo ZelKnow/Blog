@@ -30,7 +30,7 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:image" content="https://blog.zelknow.com/2022/08/19/selinux-domain-transition/12-lsm-selinux-arch.png">
 <meta property="article:published_time" content="2022-08-19T11:35:58.000Z">
-<meta property="article:modified_time" content="2022-08-19T11:39:08.946Z">
+<meta property="article:modified_time" content="2022-08-19T11:50:29.716Z">
 <meta property="article:author" content="ZelKnow">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:image" content="https://blog.zelknow.com/2022/08/19/selinux-domain-transition/12-lsm-selinux-arch.png">
@@ -192,7 +192,7 @@
               <span class="post-meta-item-text">发表于</span>
               
 
-              <time title="创建时间：2022-08-19 19:35:58 / 修改时间：19:39:08" itemprop="dateCreated datePublished" datetime="2022-08-19T19:35:58+08:00">2022-08-19</time>
+              <time title="创建时间：2022-08-19 19:35:58 / 修改时间：19:50:29" itemprop="dateCreated datePublished" datetime="2022-08-19T19:35:58+08:00">2022-08-19</time>
             </span>
             <span class="post-meta-item">
               <span class="post-meta-item-icon">
@@ -220,7 +220,11 @@
 <h2 id="数据结构">数据结构</h2>
 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="class"><span class="keyword">struct</span> <span class="title">task_security_struct</span> &#123;</span></span><br><span class="line">	u32 osid;		<span class="comment">/* SID prior to last execve */</span></span><br><span class="line">	u32 sid;		<span class="comment">/* current SID */</span></span><br><span class="line">	u32 exec_sid;		<span class="comment">/* exec SID */</span></span><br><span class="line">	u32 create_sid;		<span class="comment">/* fscreate SID */</span></span><br><span class="line">	u32 keycreate_sid;	<span class="comment">/* keycreate SID */</span></span><br><span class="line">	u32 sockcreate_sid;	<span class="comment">/* fscreate SID */</span></span><br><span class="line">&#125; __randomize_layout;</span><br></pre></td></tr></table></figure>
 <p>Security ID (SID) 是安全上下文的编号，用来提升搜索速度。</p>
-<p>进程执行 <code>execve</code> 系统调用时，进程的安全上下文可能发生变化，新安全上下文： - 来自进程的旧安全上下文和被执行文件的安全上下文进行运算后的结果； - 来自进程的执行安全上下文（<code>exec_sid</code>）。</p>
+<p>进程执行 <code>execve</code> 系统调用时，进程的安全上下文可能发生变化，新安全上下文：</p>
+<ul>
+<li>来自进程的旧安全上下文和被执行文件的安全上下文进行运算后的结果；</li>
+<li>来自进程的执行安全上下文（<code>exec_sid</code>）。</li>
+</ul>
 <h2 id="源码">源码</h2>
 <p>从 <code>execve</code> 系统调用开始</p>
 <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">SYSCALL_DEFINE3 (execve,</span><br><span class="line">		<span class="keyword">const</span> <span class="keyword">char</span> __user *, filename,</span><br><span class="line">		<span class="keyword">const</span> <span class="keyword">char</span> __user *<span class="keyword">const</span> __user *, argv,</span><br><span class="line">		<span class="keyword">const</span> <span class="keyword">char</span> __user *<span class="keyword">const</span> __user *, envp)</span><br><span class="line">&#123;</span><br><span class="line">	<span class="keyword">return</span> do_execve (getname (filename), argv, envp);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
